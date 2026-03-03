@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual Environments
+venv/
+env/
+.env/
+.venv/
+env.bak/
+venv.bak/
+
+# Environment Variables
+.env
+.env.local
+
+# Google Drive API and Credentials
+credentials.json
+token.json
+
+# SQLite Databases
+*.sqlite3
+*.db
+noor_book.db
+
+# Downloaded files and assets
+covers/
+downloads/
+temp/
+out/
+books/
+*.pdf
+*.epub
+*.mobi
+
+# OS Generated
+.DS_Store
+Thumbs.db
+
+# Idea / VS Code
+.idea/
+.vscode/
+
+# Secrets
+token.json
+credentials.json
+*.env
+
+
+# Secrets
+token.json
+credentials.json
+*.env
+
