@@ -77,9 +77,9 @@ class Orchestrator:
             page += 1
             time.sleep(get_random_delay())
             
-    def crawl_authors_concurrent(self, max_pages: int = 100, max_workers: int = 20):
-        url_limit = max_pages if max_pages > 0 else 100
-        logger.info(f"[bold cyan]👤 Fetching Authors Concurrently (Max pages: {url_limit})...[/bold cyan]")
+    def crawl_authors_concurrent(self, max_pages: int = 0, max_workers: int = 20):
+        url_limit = max_pages
+        logger.info(f"[bold cyan]👤 Fetching Authors Concurrently (Max pages: {'Unlimited' if url_limit <= 0 else url_limit})...[/bold cyan]")
         base_authors_url = f"{BASE_URL}/مؤلفو-الكتب"
         
         html = self.http_client.get(base_authors_url)
@@ -102,10 +102,12 @@ class Orchestrator:
             try:
                 current_html = self.http_client.get(url) 
                 if not current_html or len(current_html) < 200:
-                    return page_num, []
+                    return page_num, [], True
 
                 soup = BeautifulSoup(current_html, 'lxml')
                 author_divs = soup.select('div.row.book_rows > div')
+                if not author_divs:
+                    return page_num, [], True
                 
                 new_authors = []
                 for div in author_divs:
@@ -118,23 +120,41 @@ class Orchestrator:
                     name = title_tag.get_text(strip=True) if title_tag else a_tag.get_text(strip=True)
                     new_authors.append(AuthorBase(name=name, url=href))
                     
-                return page_num, new_authors
+                return page_num, new_authors, False
             except Exception as e:
                 logger.error(f"Error fetching page {page_num}: {e}")
-                return page_num, []
+                return page_num, [], False
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(fetch_page, p): p for p in range(1, url_limit + 1)}
+            current_page = 1
+            has_more_pages = True
             
-            for future in concurrent.futures.as_completed(futures):
-                page_num, new_authors = future.result()
-                if new_authors:
-                    newly_inserted = self.db.add_temp_authors(new_authors)
-                    total_authors += newly_inserted
-                    if newly_inserted > 0:
-                        logger.info(f"[green]✓ Page {page_num}: Fetched {len(new_authors)} | New: {newly_inserted} (New Total DB: {total_authors})[/green]")
-                    else:
-                        logger.info(f"[dim]✓ Page {page_num}: Fetched {len(new_authors)} | New: 0 (All Duplicates)[/dim]")
+            while has_more_pages:
+                batch_size = max_workers
+                if url_limit > 0:
+                    remaining = (url_limit - current_page) + 1
+                    if remaining <= 0:
+                        break
+                    batch_size = min(batch_size, remaining)
+                
+                batch_end = current_page + batch_size
+                futures = {executor.submit(fetch_page, p): p for p in range(current_page, batch_end)}
+                
+                for future in concurrent.futures.as_completed(futures):
+                    page_num, new_authors, is_end = future.result()
+                    
+                    if is_end:
+                        has_more_pages = False
+                        
+                    if new_authors:
+                        newly_inserted = self.db.add_temp_authors(new_authors)
+                        total_authors += newly_inserted
+                        if newly_inserted > 0:
+                            logger.info(f"[green]✓ Page {page_num}: Fetched {len(new_authors)} | New: {newly_inserted} (New Total DB: {total_authors})[/green]")
+                        else:
+                            logger.info(f"[dim]✓ Page {page_num}: Fetched {len(new_authors)} | New: 0 (All Duplicates)[/dim]")
+                
+                current_page = batch_end
 
             
     def crawl_author_details(self, limit: int = 100):
