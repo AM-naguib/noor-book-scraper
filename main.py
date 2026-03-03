@@ -37,6 +37,7 @@ def show_stats(db: Database):
 def main():
     parser = argparse.ArgumentParser(description="Noor-Book Authors Scraper (Refactored)")
     parser.add_argument('--max-pages', '-p', type=int, default=0, help='Max pages to crawl list')
+    parser.add_argument('--start-page', '-s', type=int, default=1, help='Page to start crawling authors from')
     parser.add_argument('--crawl-details', '-d', action='store_true', help='Crawl author profiles from queue')
     parser.add_argument('--crawl-books', '-b', action='store_true', help='Crawl book details from queue')
     parser.add_argument('--download', action='store_true', help='Download the PDF files when crawling books')
@@ -62,9 +63,9 @@ def main():
         elif args.crawl_books:
             orchestrator.crawl_book_details(limit=args.limit, download_pdfs=args.download)
         elif args.concurrent:
-            orchestrator.crawl_authors_concurrent(max_pages=args.max_pages, max_workers=args.workers)
+            orchestrator.crawl_authors_concurrent(max_pages=args.max_pages, max_workers=args.workers, start_page=args.start_page)
         else:
-            orchestrator.crawl_authors(max_pages=args.max_pages)
+            orchestrator.crawl_authors(max_pages=args.max_pages, start_page=args.start_page)
             
         show_stats(db)
 

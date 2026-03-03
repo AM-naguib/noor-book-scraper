@@ -23,10 +23,10 @@ class Orchestrator:
         self.api_client = APIClient(self.http_client)
         self.drive_client = DriveClient()
 
-    def crawl_authors(self, max_pages: int = 0):
-        logger.info("[bold cyan]👤 Fetching Authors...[/bold cyan]")
+    def crawl_authors(self, max_pages: int = 0, start_page: int = 1):
+        logger.info(f"[bold cyan]👤 Fetching Authors (Starting from page {start_page})...[/bold cyan]")
         base_authors_url = f"{BASE_URL}/مؤلفو-الكتب"
-        page = 1
+        page = start_page
         total_authors = 0
         
         html = self.http_client.get(base_authors_url)
@@ -42,8 +42,45 @@ class Orchestrator:
             logger.error("❌ Failed to retrieve authentication tokens for pagination.")
             return
             
+        is_first_iteration = True
+        page_retries = 0
+        
         while True:
-            current_html = html if page == 1 else self.http_client.get(f"{base_authors_url}?page_ajax={page}&token={csrf}&ls={ls}")
+            try:
+                if page == 1 and is_first_iteration:
+                    current_html = html
+                else:
+                    current_html = self.http_client.get(f"{base_authors_url}?page_ajax={page}&token={csrf}&ls={ls}")
+                is_first_iteration = False
+                page_retries = 0
+            except Exception as e:
+                page_retries += 1
+                if page_retries > 3:
+                    logger.error(f"❌ Maximum retries exceeded for page {page}. Exiting crawl.")
+                    break
+                logger.warning(f"⚠️ Failed fetching page {page} (Retry {page_retries}/3).")
+                logger.info("🔄 Cooling down for 15 seconds and refreshing tokens...")
+                time.sleep(15)
+                try:
+                    # Renew session and tokens to fix expiration/IP blocks
+                    self.http_client.close()
+                    self.http_client = HTTPClient()
+                    self.api_client = APIClient(self.http_client)
+                    
+                    fresh_html = self.http_client.get(base_authors_url)
+                    if fresh_html:
+                        new_tokens = extract_tokens(fresh_html)
+                        new_csrf = new_tokens.get('csrf_token')
+                        new_ls = self.api_client.check_user_ls(new_tokens, base_authors_url) if new_csrf else None
+                        if new_csrf and new_ls:
+                            csrf = new_csrf
+                            ls = new_ls
+                            html = fresh_html
+                            logger.info("[green]✅ Tokens & Browser Session refreshed successfully.[/green]")
+                except Exception as inner_e:
+                    logger.error(f"❌ Failed to refresh tokens: {inner_e}")
+                
+                continue
                 
             if not current_html or len(current_html) < 200:
                 logger.info(f"⚠️ No more content at page {page}")
@@ -77,9 +114,9 @@ class Orchestrator:
             page += 1
             time.sleep(get_random_delay())
             
-    def crawl_authors_concurrent(self, max_pages: int = 0, max_workers: int = 20):
+    def crawl_authors_concurrent(self, max_pages: int = 0, max_workers: int = 20, start_page: int = 1):
         url_limit = max_pages
-        logger.info(f"[bold cyan]👤 Fetching Authors Concurrently (Max pages: {'Unlimited' if url_limit <= 0 else url_limit})...[/bold cyan]")
+        logger.info(f"[bold cyan]👤 Fetching Authors Concurrently (Start: {start_page}, Max pages: {'Unlimited' if url_limit <= 0 else url_limit})...[/bold cyan]")
         base_authors_url = f"{BASE_URL}/مؤلفو-الكتب"
         
         html = self.http_client.get(base_authors_url)
@@ -126,7 +163,7 @@ class Orchestrator:
                 return page_num, [], False
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            current_page = 1
+            current_page = start_page
             has_more_pages = True
             
             while has_more_pages:
