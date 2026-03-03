@@ -38,11 +38,13 @@ class Database:
         conn.commit()
         conn.close()
 
-    def add_temp_authors(self, authors: List[AuthorBase]):
+    def add_temp_authors(self, authors: List[AuthorBase]) -> int:
         conn = self._get_conn()
         try:
-            conn.executemany("INSERT OR IGNORE INTO temp_authors (name, url) VALUES (?, ?)", [(a.name, a.url) for a in authors])
+            cursor = conn.cursor()
+            cursor.executemany("INSERT OR IGNORE INTO temp_authors (name, url) VALUES (?, ?)", [(a.name, a.url) for a in authors])
             conn.commit()
+            return cursor.rowcount
         finally:
             conn.close()
 

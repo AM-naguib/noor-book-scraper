@@ -1,6 +1,8 @@
 import os
 import json
 import time
+import concurrent.futures
+import threading
 from bs4 import BeautifulSoup
 
 from core.http_client import HTTPClient
@@ -66,14 +68,74 @@ class Orchestrator:
             
             if not new_authors: break
                 
-            self.db.add_temp_authors(new_authors)
-            total_authors += len(new_authors)
-            logger.info(f"[green]✓ Page {page}: Saved {len(new_authors)} authors (Total: {total_authors})[/green]")
+            newly_inserted = self.db.add_temp_authors(new_authors)
+            total_authors += newly_inserted
+            logger.info(f"[green]✓ Page {page}: Fetched {len(new_authors)} | New: {newly_inserted} (DB Added: {total_authors})[/green]")
                 
             limit = max_pages if max_pages > 0 else MAX_PAGES_PER_TAG
             if limit > 0 and page >= limit: break
             page += 1
             time.sleep(get_random_delay())
+            
+    def crawl_authors_concurrent(self, max_pages: int = 100, max_workers: int = 20):
+        url_limit = max_pages if max_pages > 0 else 100
+        logger.info(f"[bold cyan]👤 Fetching Authors Concurrently (Max pages: {url_limit})...[/bold cyan]")
+        base_authors_url = f"{BASE_URL}/مؤلفو-الكتب"
+        
+        html = self.http_client.get(base_authors_url)
+        if not html:
+            logger.error("⚠️ Failed to fetch initial authors page")
+            return
+
+        tokens = extract_tokens(html)
+        csrf = tokens.get('csrf_token')
+        ls = self.api_client.check_user_ls(tokens, base_authors_url) if csrf else None
+
+        if not csrf or not ls:
+            logger.error("❌ Failed to retrieve authentication tokens for pagination.")
+            return
+
+        total_authors = 0
+
+        def fetch_page(page_num):
+            url = f"{base_authors_url}?page_ajax={page_num}&token={csrf}&ls={ls}"
+            try:
+                current_html = self.http_client.get(url) 
+                if not current_html or len(current_html) < 200:
+                    return page_num, []
+
+                soup = BeautifulSoup(current_html, 'lxml')
+                author_divs = soup.select('div.row.book_rows > div')
+                
+                new_authors = []
+                for div in author_divs:
+                    a_tag = div.select_one('a[href]')
+                    if not a_tag: continue
+                    href = a_tag['href']
+                    if href.startswith('/'): href = BASE_URL + href
+                        
+                    title_tag = a_tag.find(['h2', 'h3', 'div'])
+                    name = title_tag.get_text(strip=True) if title_tag else a_tag.get_text(strip=True)
+                    new_authors.append(AuthorBase(name=name, url=href))
+                    
+                return page_num, new_authors
+            except Exception as e:
+                logger.error(f"Error fetching page {page_num}: {e}")
+                return page_num, []
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {executor.submit(fetch_page, p): p for p in range(1, url_limit + 1)}
+            
+            for future in concurrent.futures.as_completed(futures):
+                page_num, new_authors = future.result()
+                if new_authors:
+                    newly_inserted = self.db.add_temp_authors(new_authors)
+                    total_authors += newly_inserted
+                    if newly_inserted > 0:
+                        logger.info(f"[green]✓ Page {page_num}: Fetched {len(new_authors)} | New: {newly_inserted} (New Total DB: {total_authors})[/green]")
+                    else:
+                        logger.info(f"[dim]✓ Page {page_num}: Fetched {len(new_authors)} | New: 0 (All Duplicates)[/dim]")
+
             
     def crawl_author_details(self, limit: int = 100):
         pending = self.db.get_pending_temp_authors(limit=limit)

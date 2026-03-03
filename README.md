@@ -89,9 +89,16 @@ The scraping logic is batched into 3 distinct commands. Run them consecutively o
 
 **1. Crawl Author Pages (Queueing)**
 ```bash
-# Crawl the 'Authors' directory to extract their profile links into temp_authors
+# Standard mode: Crawl sequentially
 python main.py
+
+# Concurrent mode 🚀 (Extremely Fast): Crawl pages concurrently
+# -c or --concurrent: Enable concurrent fetching
+# -w or --workers: Number of simultaneous connections (Default: 20)
+# -p or --max-pages: Number of pages to fetch (Default: 100)
+python main.py --concurrent --max-pages 100 --workers 15
 ```
+> **⚠️ Warning for Concurrent Mode**: It is highly recommended to keep `--workers` (or `-w`) at `15` or `20` maximum. Using a higher number (like 50) may trigger Cloudflare's bot protection or cause "Operation timed out" errors (`curl: 28`) because the server will refuse to serve too many requests at the exact same time.
 
 **2. Scrape Author Details & Find Books**
 ```bash
